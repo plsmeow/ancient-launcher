@@ -1,0 +1,104 @@
+name: Build CI
+
+on:
+  push:
+    branches: [main, tauri/v2]
+  pull_request:
+    branches: [main, tauri/v2]
+  workflow_dispatch:
+
+concurrency:
+  group: build-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - ubuntu-22.04
+          - windows-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libx11-dev \
+            xorg-dev \
+            libglu1-mesa-dev \
+            libglib2.0-0 \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-${{ matrix.platform }}-v1
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Build application (no bundle)
+        run: bun run tauri build --no-bundle
+
+      - name: Upload executable (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-${{ matrix.platform }}
+          path: src-tauri/target/release/ancient-launcher
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload executable (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-${{ matrix.platform }}
+          path: src-tauri/target/release/ancient-launcher.exe
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload executable (macOS)
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-${{ matrix.platform }}
+          path: src-tauri/target/release/ancient-launcher
+          if-no-files-found: ignore
+          retention-days: 7
