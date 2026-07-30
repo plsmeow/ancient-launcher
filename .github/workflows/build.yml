@@ -1,0 +1,102 @@
+name: Build
+
+on:
+  push:
+    branches: [main, tauri/v2]
+  pull_request:
+    branches: [main, tauri/v2]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }}${{ matrix.target && format(' / {0}', matrix.target) }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ""
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libx11-dev \
+            xorg-dev \
+            libglu1-mesa-dev \
+            libglib2.0-0 \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}-v1
+
+      - name: Build & Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: >-
+            ${{ startsWith(github.event.head_commit.message, 'release: ') && 'v__VERSION__' || format('v__VERSION__-{0}', github.sha) }}
+          releaseName: >-
+            ${{ startsWith(github.event.head_commit.message, 'release: ') && 'Release v__VERSION__' || format('Development build - {0}', github.sha) }}
+          releaseBody: >-
+            ${{ startsWith(github.event.head_commit.message, 'release: ') && 'See the assets to download and install this version.' || format('Development build from commit {0}', github.sha) }}
+          releaseDraft: ${{ startsWith(github.event.head_commit.message, 'release: ') }}
+          prerelease: ${{ !startsWith(github.event.head_commit.message, 'release: ') }}
+          args: ${{ matrix.args }}

@@ -1,0 +1,50 @@
+@font-face {
+    font-family: "Inter";
+    font-weight: 600;
+    src: url("font/Inter-Bold.ttf");
+}
+@font-face {
+    font-family: "Inter";
+    font-weight: 500;
+    src: url("font/Inter-Medium.ttf");
+}
+@font-face {
+    font-family: "Inter";
+    font-weight: 400;
+    src: url("font/Inter-Regular.ttf");
+}
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-appearance: none;
+}
+*:focus {
+    outline: none;
+}
+html, body {
+    background: rgba(5, 5, 5, 0.85);
+    font-family: "Inter", sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    user-select: none;
+    height: 100%;
+    overflow: hidden;
+    color: rgba(255,255,255,0.9);
+}
+::-webkit-scrollbar {
+    width: 5px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.12);
+    border-radius: 4px;
+}
+::selection {
+    background: rgba(255,255,255,0.1);
+}
+input {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.9);
+    font-family: "Inter", sans-serif;
+}

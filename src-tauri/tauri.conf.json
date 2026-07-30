@@ -1,0 +1,68 @@
+{
+  "productName": "Ancient Launcher",
+  "version": "1.0.0",
+  "identifier": "tech.onetap.ancient",
+  "build": {
+    "beforeBuildCommand": "bun run build",
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Ancient Launcher",
+        "label": "main",
+        "width": 800,
+        "minWidth": 800,
+        "height": 600,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": true,
+        "decorations": false,
+        "center": true,
+        "windowEffects": { "effects": ["acrylic"] },
+        "shadow": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "category": "Game",
+    "copyright": "plsmeow",
+    "publisher": "plsmeow",
+    "externalBin": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "Ancient client launcher for Minecraft",
+    "longDescription": "A launcher for the Ancient hacked-client for Minecraft",
+    "license": "GPL-3.0",
+    "licenseFile": "../LICENSE",
+    "resources": [],
+    "targets": "all",
+    "createUpdaterArtifacts": "v1Compatible",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": { "type": "embedBootstrapper" }
+    },
+    "linux": {
+      "appimage": { "bundleMediaFramework": true }
+    },
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    }
+  }
+}
