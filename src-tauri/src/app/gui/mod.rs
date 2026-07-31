@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use commands::*;
@@ -6,6 +7,7 @@ use tauri::Window;
 pub type ShareableWindow = Arc<Mutex<Window>>;
 
 pub struct RunnerInstance {
+    pub cancel: Arc<AtomicBool>,
     pub terminator: tokio::sync::oneshot::Sender<()>,
 }
 

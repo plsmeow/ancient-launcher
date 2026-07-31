@@ -108,10 +108,12 @@ pub(crate) async fn run_client(
     }
 
     let (terminator_tx, terminator_rx) = tokio::sync::oneshot::channel();
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     *runner_instance
         .lock()
         .map_err(|e| format!("unable to lock runner instance: {:?}", e))? = Some(RunnerInstance {
+        cancel: cancel.clone(),
         terminator: terminator_tx,
     });
 
@@ -119,7 +121,7 @@ pub(crate) async fn run_client(
 
     let parameters = StartParameter {
         java_distribution: options.start_options.java_distribution,
-        jvm_args: vec![],
+        jvm_args: options.start_options.jvm_args,
         memory: options.start_options.memory,
         custom_data_path: if !options.start_options.custom_data_path.is_empty() {
             Some(options.start_options.custom_data_path)
@@ -153,6 +155,7 @@ pub(crate) async fn run_client(
                     hide_window: |w| w.lock().unwrap().hide().unwrap(),
                     data: Box::new(shareable_window.clone()),
                     terminator: terminator_rx,
+                    cancel: cancel.clone(),
                 };
 
                 if let Err(e) =
@@ -161,13 +164,17 @@ pub(crate) async fn run_client(
                     if !keep_launcher_open {
                         shareable_window.lock().unwrap().show().unwrap();
                     }
-                    let message = format!("An error occurred:\n\n{:?}", e);
-                    shareable_window
-                        .lock()
-                        .unwrap()
-                        .emit("client-error", ())
-                        .unwrap();
-                    handle_stderr(&shareable_window, message.as_bytes()).unwrap();
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        handle_log(&shareable_window, "Запуск отменён").unwrap();
+                    } else {
+                        let message = format!("An error occurred:\n\n{:?}", e);
+                        shareable_window
+                            .lock()
+                            .unwrap()
+                            .emit("client-error", ())
+                            .unwrap();
+                        handle_stderr(&shareable_window, message.as_bytes()).unwrap();
+                    }
                 }
 
                 *copy_of_runner_instance
@@ -193,8 +200,10 @@ pub(crate) async fn terminate(app_state: tauri::State<'_, AppState>) -> Result<(
         .map_err(|e| format!("unable to lock runner instance: {:?}", e))?;
 
     if let Some(inst) = lck.take() {
-        info!("Sending sigterm");
-        inst.terminator.send(()).unwrap();
+        info!("Cancelling launch");
+        inst.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = inst.terminator.send(());
     }
     Ok(())
 }

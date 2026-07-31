@@ -49,6 +49,7 @@ pub const PREDEFINED_MODS: &[PredefinedModDef] = &[
     PredefinedModDef { id: "ukulib", name: "Ukulib", modrinth_slug: "ukulib", depends_on: None, always_enabled: false },
     PredefinedModDef { id: "ukus-armor-hud", name: "Uku's Armor HUD", modrinth_slug: "ukus-armor-hud", depends_on: Some("ukulib"), always_enabled: false },
     PredefinedModDef { id: "wider-tab", name: "Wider Tab", modrinth_slug: "wider-tab", depends_on: None, always_enabled: false },
+    PredefinedModDef { id: "in-game-account-switcher", name: "In Game Account Switcher", modrinth_slug: "in-game-account-switcher", depends_on: None, always_enabled: false },
 ];
 
 #[derive(Deserialize)]

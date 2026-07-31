@@ -42,6 +42,8 @@ pub(crate) async fn launch(
         })
         .await?;
 
+    launcher_data.check_cancelled()?;
+
     let data_directory = launching_parameter
         .custom_data_path
         .clone()
@@ -99,7 +101,11 @@ pub(crate) async fn launch(
         version.merge(parent_version)?;
     }
 
+    launcher_data.check_cancelled()?;
+
     setup_mods(&data_directory, predefined_mods_state, &launcher_data).await?;
+
+    launcher_data.check_cancelled()?;
 
     launcher_data.progress_update(ProgressUpdate::set_label("Запуск..."));
     launcher::launch(

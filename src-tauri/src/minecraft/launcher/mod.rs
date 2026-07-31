@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use std::process::exit;
 
@@ -37,11 +39,23 @@ pub struct LauncherData<D: Send + Sync> {
     pub(crate) hide_window: fn(&D),
     pub(crate) data: Box<D>,
     pub(crate) terminator: tokio::sync::oneshot::Receiver<()>,
+    pub(crate) cancel: Arc<AtomicBool>,
 }
 
 impl<D: Send + Sync> LauncherData<D> {
     fn hide_window(&self) {
         (self.hide_window)(&self.data);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    pub fn check_cancelled(&self) -> Result<()> {
+        if self.is_cancelled() {
+            bail!("launch cancelled by user");
+        }
+        Ok(())
     }
 }
 
@@ -86,6 +100,8 @@ pub async fn launch<D: Send + Sync>(
     .await
     .context("Failed to load JRE")?;
 
+    launcher_data.check_cancelled()?;
+
     launcher_data.log(&format!("Java Path: {:?}", java_bin));
     if !java_bin.exists() {
         bail!("Java binary not found");
@@ -113,6 +129,8 @@ pub async fn launch<D: Send + Sync>(
     .await
     .context("Failed to setup libraries")?;
 
+    launcher_data.check_cancelled()?;
+
     let asset_index_location = setup_assets(
         &assets_folder,
         &version_profile,
@@ -121,6 +139,8 @@ pub async fn launch<D: Send + Sync>(
     )
     .await
     .context("Failed to setup assets")?;
+
+    launcher_data.check_cancelled()?;
 
     let java_runtime = JavaRuntime::new(java_bin);
 
@@ -187,7 +207,7 @@ pub async fn launch<D: Send + Sync>(
 
     let mut running_task = java_runtime.execute(mapped, &game_dir).await?;
 
-    launcher_data.progress_update(ProgressUpdate::set_label("Работает..."));
+    launcher_data.progress_update(ProgressUpdate::set_label("Запущено"));
 
     if !launching_parameter.keep_launcher_open {
         launcher_data.hide_window();

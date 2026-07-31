@@ -25,12 +25,16 @@ pub(crate) struct Options {
 pub(crate) struct StartOptions {
     #[serde(rename = "account")]
     pub minecraft_account: Option<MinecraftAccount>,
+    #[serde(rename = "accounts", default)]
+    pub accounts: Vec<MinecraftAccount>,
     #[serde(rename = "customDataPath", default)]
     pub custom_data_path: String,
     #[serde(rename = "javaDistribution", default)]
     pub java_distribution: DistributionSelection,
     #[serde(rename = "memory", default = "default_memory")]
     pub memory: u64,
+    #[serde(rename = "jvmArgs", default)]
+    pub jvm_args: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,9 +65,11 @@ impl Default for StartOptions {
     fn default() -> Self {
         Self {
             minecraft_account: None,
+            accounts: Vec::new(),
             java_distribution: DistributionSelection::default(),
             custom_data_path: String::new(),
             memory: 4096,
+            jvm_args: Vec::new(),
         }
     }
 }
