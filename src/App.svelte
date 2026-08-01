@@ -16,8 +16,12 @@
 
     let offlineUsername = "";
     let msAuthState = null;
+    let addingAccount = false;
+    let accountDropdownShown = false;
+    let settingsShown = false;
 
     let running = false;
+    let launched = false;
     let progressText = "";
     let progressValue = 0;
     let progressMax = 0;
@@ -41,19 +45,48 @@
                 ...await invoke("get_options")
             };
             if (!options.start) {
-                options.start = { account: null, customDataPath: "", memory: 4096, javaDistribution: { type: "manual", value: "temurin" }, jvmArgs: null };
+                options.start = { account: null, accounts: [], customDataPath: "", memory: 4096, javaDistribution: { type: "manual", value: "temurin" }, jvmArgs: [] };
                 options.launcher = { concurrentDownloads: 10, keepLauncherOpen: false };
+            }
+            if (!Array.isArray(options.start.accounts)) {
+                options.start.accounts = options.start.account ? [options.start.account] : [];
+            }
+            if (!Array.isArray(options.start.jvmArgs)) {
+                options.start.jvmArgs = [];
             }
         } catch (e) {
             console.error("Failed to load options:", e);
         }
     }
 
+    function accountKey(acc) {
+        return `${acc.type}:${acc.id || acc.uuid || acc.name}`;
+    }
+
+    function accountAvatar(acc) {
+        const id = acc.id || acc.uuid;
+        return id ? `https://minotar.net/helm/${id}/20.png` : null;
+    }
+
+    function hideAvatar(e) {
+        e.target.style.display = "none";
+    }
+
+    function upsertAccount(account) {
+        const key = accountKey(account);
+        const idx = options.start.accounts.findIndex(a => accountKey(a) === key);
+        if (idx >= 0) options.start.accounts[idx] = account;
+        else options.start.accounts = [...options.start.accounts, account];
+        options.start.account = account;
+    }
+
     async function handleLogin(username) {
         if (!username || username.trim().length === 0) return;
         try {
             const account = await invoke("login_offline", { username: username.trim() });
-            options.start.account = account;
+            upsertAccount(account);
+            addingAccount = false;
+            offlineUsername = "";
             await options.store();
         } catch (e) {
             console.error("Login failed:", e);
@@ -64,7 +97,8 @@
         msAuthState = { code: null, uri: null };
         try {
             const account = await invoke("login_microsoft");
-            options.start.account = account;
+            upsertAccount(account);
+            addingAccount = false;
             await options.store();
         } catch (e) {
             console.error("Microsoft login failed:", e);
@@ -72,27 +106,54 @@
         msAuthState = null;
     }
 
-    async function handleLogout() {
-        if (options.start.account) {
+    async function switchAccount(account) {
+        if (accountKey(account) === accountKey(options.start.account)) return;
+        try {
+            account = await invoke("refresh", { accountData: account });
+            upsertAccount(account);
+        } catch (e) {
+            console.error("Refresh failed:", e);
+            options.start.account = account;
+        }
+        await options.store();
+    }
+
+    async function removeAccount(account) {
+        const key = accountKey(account);
+        if (options.start.account && accountKey(options.start.account) === key) {
             try {
-                await invoke("logout", { accountData: options.start.account });
+                await invoke("logout", { accountData: account });
             } catch (e) {
                 console.error("Logout failed:", e);
             }
+            options.start.account = null;
         }
-        options.start.account = null;
+        options.start.accounts = options.start.accounts.filter(a => accountKey(a) !== key);
         await options.store();
     }
 
     async function handleLaunch() {
         try {
+            await refreshActiveAccount();
             await options.store();
             running = true;
+            launched = false;
             log = [];
             await invoke("run_client", { options });
         } catch (e) {
             running = false;
             console.error("Launch failed:", e);
+        }
+    }
+
+    async function refreshActiveAccount() {
+        if (!options.start.account) return;
+        try {
+            const refreshed = await invoke("refresh", { accountData: options.start.account });
+            upsertAccount(refreshed);
+            await options.store();
+        } catch (e) {
+            console.error("Refresh failed:", e);
         }
     }
 
@@ -272,12 +333,16 @@
     });
     listen("progress-update", (e) => {
         const u = e.payload;
-        if (u.type === "label") progressText = u.value;
+        if (u.type === "label") {
+            progressText = u.value;
+            if (u.value === "Запущено") launched = true;
+        }
         else if (u.type === "max") progressMax = u.value;
         else if (u.type === "progress") progressValue = u.value;
     });
     listen("client-exited", () => {
         running = false;
+        launched = false;
     });
     listen("client-error", () => {
         logShown = true;
@@ -293,6 +358,7 @@
         try { latestRelease = await invoke("fetch_latest_release"); } catch (e) {}
         await loadMods();
         loading = false;
+        refreshActiveAccount();
         await tick();
         if (canvas) setupStars();
         window.addEventListener("resize", handleResize);
@@ -343,7 +409,7 @@
                     </button>
                 </div>
             </div>
-        {:else if !options?.start?.account}
+        {:else if addingAccount || !options?.start?.accounts?.length}
             <div class="card">
                 <div class="card-content">
                     <div class="input-group">
@@ -355,16 +421,59 @@
                     <button class="btn btn-secondary" on:click={handleMicrosoftLogin}>
                         microsoft
                     </button>
+                    {#if addingAccount && options?.start?.accounts?.length}
+                        <button class="btn btn-link" on:click={() => addingAccount = false}>отмена</button>
+                    {/if}
                 </div>
             </div>
         {:else}
             <div class="card card-wide">
                 <div class="card-header">
-                    <div class="user-info">
-                        <span class="user-name">{options.start.account.name}</span>
-                        <span class="user-type">{options.start.account.type}</span>
+                    <div class="account-dropdown-wrap">
+                        <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                        <div class="user-info user-info-btn" on:click={() => accountDropdownShown = !accountDropdownShown}>
+                            {#if options.start.account && accountAvatar(options.start.account)}
+                                <img class="avatar" src={accountAvatar(options.start.account)} alt="" on:error={hideAvatar} />
+                            {/if}
+                            <span class="user-name">{options.start.account?.name || "выберите аккаунт"}</span>
+                            {#if options.start.account}
+                                <span class="user-type">{options.start.account.type}</span>
+                            {/if}
+                            <svg class="dropdown-arrow" class:dropdown-arrow-open={accountDropdownShown} width="10" height="10" viewBox="0 0 10 10">
+                                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        {#if accountDropdownShown}
+                            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                            <div class="dropdown-overlay" on:click={() => accountDropdownShown = false}></div>
+                            <div class="account-dropdown">
+                                {#each options.start.accounts as acc}
+                                    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                                    <div
+                                        class="account-row"
+                                        class:account-active={options.start.account && accountKey(acc) === accountKey(options.start.account)}
+                                        on:click={() => { switchAccount(acc); accountDropdownShown = false; }}
+                                    >
+                                        {#if accountAvatar(acc)}
+                                            <img class="avatar" src={accountAvatar(acc)} alt="" on:error={hideAvatar} />
+                                        {/if}
+                                        <span class="account-name">{acc.name}</span>
+                                        <span class="account-type">{acc.type}</span>
+                                        <button class="btn-icon btn-icon-sm account-remove" on:click|stopPropagation={() => removeAccount(acc)} title="удалить">
+                                            <svg width="10" height="10" viewBox="0 0 10 10">
+                                                <line x1="1" y1="1" x2="9" y2="9" stroke="rgba(255,255,255,0.4)" stroke-width="1"/>
+                                                <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255,255,255,0.4)" stroke-width="1"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                {/each}
+                                <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+                                <div class="account-row account-add" on:click={() => { addingAccount = true; offlineUsername = ""; accountDropdownShown = false; }}>
+                                    <span class="account-add-text">+ добавить аккаунт</span>
+                                </div>
+                            </div>
+                        {/if}
                     </div>
-                    <button class="btn-link" on:click={handleLogout}>выйти</button>
                 </div>
 
                 <div class="card-content">
@@ -378,24 +487,9 @@
                         </div>
                     </div>
 
-                    <div class="path-group">
-                        <span class="path-label">путь к данным</span>
-                        <div class="path-row">
-                            <span class="path-value">{options.start.customDataPath || "по умолчанию"}</span>
-                            <div class="path-buttons">
-                                <button class="btn-icon" on:click={openGameDir} title="открыть папку">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                                    </svg>
-                                </button>
-                                <button class="btn-icon" on:click={() => modsShown = true} title="моды">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
-                                    </svg>
-                                </button>
-                                <button class="btn-link" on:click={selectDataPath}>изменить</button>
-                            </div>
-                        </div>
+                    <div class="split-buttons">
+                        <button class="btn btn-secondary" on:click={() => modsShown = true}>моды</button>
+                        <button class="btn btn-secondary" on:click={() => settingsShown = true}>настройки</button>
                     </div>
 
                     {#if running}
@@ -405,12 +499,12 @@
                             {/if}
                             <progress class="progress-bar" value={progressValue} max={progressMax}></progress>
                             <div class="running-buttons">
-                                <button class="btn btn-danger" on:click={handleTerminate}>завершить</button>
+                                <button class="btn btn-danger" on:click={handleTerminate}>{launched ? "выйти" : "отмена"}</button>
                                 <button class="btn btn-secondary" on:click={() => logShown = !logShown}>лог</button>
                             </div>
                         </div>
                     {:else}
-                        <button class="btn btn-primary btn-launch" on:click={handleLaunch}>
+                        <button class="btn btn-primary btn-launch" on:click={handleLaunch} disabled={!options.start.account}>
                             запустить
                         </button>
                     {/if}
@@ -483,6 +577,57 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-link" on:click={addCustomMod}>+ добавить .jar</button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+{#if settingsShown}
+    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+    <div class="modal-overlay" on:click={() => settingsShown = false} role="presentation">
+        <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions a11y-no-noninteractive-element-interactions -->
+        <div class="modal-card" on:click|stopPropagation role="dialog">
+            <div class="modal-header">
+                <span>настройки</span>
+                <button class="btn-link" on:click={() => settingsShown = false}>✕</button>
+            </div>
+            <div class="modal-body modal-settings">
+                <div class="path-group">
+                    <span class="path-label">путь к данным</span>
+                    <div class="path-row">
+                        <span class="path-value">{options.start.customDataPath || "по умолчанию"}</span>
+                        <div class="path-buttons">
+                            <button class="btn-icon" on:click={openGameDir} title="открыть папку">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                </svg>
+                            </button>
+                            <button class="btn-link" on:click={selectDataPath}>изменить</button>
+                        </div>
+                    </div>
+                </div>
+
+                <label class="switch-label">
+                    <label class="switch">
+                        <input type="checkbox" bind:checked={options.launcher.keepLauncherOpen} on:change={() => options.store()} />
+                        <span class="slider-switch"></span>
+                    </label>
+                    <span>не закрывать лаунчер</span>
+                </label>
+
+                <div class="path-group">
+                    <span class="path-label">jvm аргументы</span>
+                    <input
+                        type="text"
+                        class="text-input jvm-input"
+                        placeholder="-XX:+UseG1GC -Dfile.encoding=UTF-8"
+                        value={(options.start.jvmArgs || []).join(" ")}
+                        on:change={(e) => {
+                            options.start.jvmArgs = e.target.value.trim().split(/\s+/).filter(Boolean);
+                            options.store();
+                        }}
+                    />
+                </div>
             </div>
         </div>
     </div>
@@ -616,6 +761,158 @@
         display: flex;
         flex-direction: column;
         gap: 16px;
+    }
+
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        image-rendering: pixelated;
+    }
+
+    .split-buttons {
+        display: flex;
+        gap: 8px;
+    }
+
+    .split-buttons .btn {
+        flex: 1;
+    }
+
+    .modal-settings {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .switch-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.5);
+        cursor: pointer;
+    }
+
+    .jvm-input {
+        text-align: left;
+        font-family: monospace;
+        font-size: 0.75rem;
+    }
+
+    .account-dropdown-wrap {
+        position: relative;
+        z-index: 30;
+    }
+
+    .user-info-btn {
+        cursor: pointer;
+        padding: 4px 8px;
+        margin: -4px -8px;
+        border-radius: 6px;
+        transition: background 0.2s;
+    }
+
+    .user-info-btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .dropdown-arrow {
+        transition: transform 0.2s;
+    }
+
+    .dropdown-arrow-open {
+        transform: rotate(180deg);
+    }
+
+    .dropdown-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 25;
+    }
+
+    .account-dropdown {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: -8px;
+        z-index: 30;
+        min-width: 180px;
+        background: #0c0c0c;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .account-add {
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 0 0 6px 6px;
+    }
+
+    .account-add-text {
+        font-size: 0.78rem;
+        color: rgba(255, 255, 255, 0.45);
+        padding: 2px 0;
+        width: 100%;
+        text-align: left;
+    }
+
+    .account-add:hover .account-add-text {
+        color: rgba(255, 255, 255, 0.75);
+    }
+
+    .account-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 6px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background 0.2s;
+        border: 1px solid transparent;
+    }
+
+    .account-row:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    .account-active {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .account-name {
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.75);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: left;
+    }
+
+    .account-type {
+        font-size: 0.65rem;
+        color: rgba(255, 255, 255, 0.3);
+    }
+
+    .account-remove {
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .account-row:hover .account-remove {
+        opacity: 1;
     }
 
     .card-footer {
